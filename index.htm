@@ -6,10 +6,9 @@
   <title>Visualizador de Fichas</title>
   <!-- Librería de diseño (Tailwind CSS) -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Librería para leer archivos CSV de Google Sheets sin errores de comas -->
+  <!-- Librería para leer archivos CSV de Google Sheets -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <style>
-    /* Reglas exclusivas para cuando se imprime o guarda como PDF */
     @media print {
       body { background: white !important; }
       .no-print { display: none !important; }
@@ -26,7 +25,7 @@
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen font-sans">
 
-  <!-- Barra superior de búsqueda (se oculta al imprimir) -->
+  <!-- Barra superior (se oculta al imprimir) -->
   <header class="no-print bg-blue-950 text-white shadow-md sticky top-0 z-10">
     <div class="max-w-5xl mx-auto px-4 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
       <div>
@@ -46,16 +45,16 @@
     <!-- Panel de búsqueda (se oculta al imprimir) -->
     <section class="no-print bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
       <label for="buscador" class="block text-sm font-semibold text-slate-700 mb-2">
-        Buscar registro (escribe código, nombre, institución o cualquier dato):
+        Buscar registro (escribe código local, nombre de IIEE o cualquier dato):
       </label>
       <div class="flex gap-2">
-        <input type="text" id="buscador" placeholder="Ej. 001, UGEL 03, Juan Pérez..."
+        <input type="text" id="buscador" placeholder="Ej. código local, nombre de IIEE..."
           class="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600">
         <button onclick="limpiarBusqueda()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm px-4 py-2 rounded-lg">
           Limpiar
         </button>
       </div>
-      <p id="estado-carga" class="text-xs text-slate-500 mt-2">Cargando base de datos...</p>
+      <p id="estado-carga" class="text-xs text-slate-500 mt-2">Cargando base de datos desde Google Sheets...</p>
 
       <!-- Lista de resultados encontrados -->
       <div id="lista-resultados" class="mt-3 max-h-56 overflow-y-auto divide-y divide-slate-100 border-t border-slate-100"></div>
@@ -63,7 +62,6 @@
 
     <!-- Contenedor de la Ficha (esto es lo único que sale en el PDF) -->
     <article id="ficha-contenedor" class="hidden bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
-      <!-- Encabezado de la ficha -->
       <div class="bg-blue-900 text-white px-6 py-5 flex justify-between items-start">
         <div>
           <p class="text-xs uppercase tracking-widest text-blue-200">Ficha Individual de Registro</p>
@@ -73,10 +71,8 @@
         <span id="ficha-fecha" class="text-xs bg-blue-800 px-3 py-1 rounded-full"></span>
       </div>
 
-      <!-- Cuerpo de campos dinámicos -->
       <div id="ficha-campos" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4"></div>
 
-      <!-- Pie de ficha -->
       <div class="bg-slate-50 border-t border-slate-200 px-6 py-3 text-xs text-slate-500 flex justify-between">
         <span>Documento generado automáticamente desde la base de datos.</span>
         <span id="fecha-impresion"></span>
@@ -86,36 +82,20 @@
 
   <script>
     // =========================================================================
-    // 1. CONFIGURACIÓN: Pega aquí el enlace CSV publicado desde Google Sheets
+    // 1. CONFIGURACIÓN
     // =========================================================================
     const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSxCtFuaJAvJVU0jEKrtjkNSXNGLTbbF1KE8DW_1gU99CeOQ1tiM0D6CHojkKQoIETNpwJQ9tl1K7By/pub?gid=0&single=true&output=csv";
 
-    // (Opcional) Escribe el nombre EXACTO de la columna que quieres como título
-    // principal de la ficha. Si lo dejas vacío "", usará la segunda columna.
     const COLUMNA_TITULO = "IIEE";
     const COLUMNA_SUBTITULO = "CODIGO LOCAL";
 
     // =========================================================================
-    // 2. LÓGICA DEL VISUALIZADOR (No necesitas modificar nada debajo)
+    // 2. LÓGICA DEL VISUALIZADOR
     // =========================================================================
     let registros = [];
     let columnas = [];
 
-    // Datos de ejemplo para que veas cómo funciona antes de poner tu enlace
-    const datosDemo = [
-      { "Marca temporal": "25/11/2026 08:30", "Código": "IE-001", "Institución": "I.E. Ejemplo Central", "UGEL": "UGEL 03", "Estado": "Completado", "Observaciones": "Sin novedades en la infraestructura." },
-      { "Marca temporal": "25/11/2026 09:15", "Código": "IE-002", "Institución": "I.E. Santa Rosa", "UGEL": "UGEL 07", "Estado": "En proceso", "Observaciones": "Pendiente validar lista de docentes." }
-    ];
-
     function iniciar() {
-      if (CSV_URL === "https://docs.google.com/spreadsheets/d/e/2PACX-1vSxCtFuaJAvJVU0jEKrtjkNSXNGLTbbF1KE8DW_1gU99CeOQ1tiM0D6CHojkKQoIETNpwJQ9tl1K7By/pub?gid=0&single=true&output=csv" || !CSV_URL.trim()) {
-        registros = datosDemo;
-        columnas = Object.keys(datosDemo[0]);
-        document.getElementById("estado-carga").textContent = "Modo demostración (2 registros). Reemplaza CSV_URL en el código con tu enlace de Google Sheets.";
-        renderizarResultados(registros);
-        return;
-      }
-
       Papa.parse(CSV_URL, {
         download: true,
         header: true,
@@ -124,10 +104,11 @@
           registros = res.data;
           columnas = res.meta.fields || [];
           document.getElementById("estado-carga").textContent = `Base conectada: ${registros.length} registros disponibles.`;
-          renderizarResultados(registros.slice(0, 20)); // Muestra los primeros 20 por defecto
+          renderizarResultados(registros.slice(0, 20));
         },
-        error: function() {
-          document.getElementById("estado-carga").textContent = "Error al leer el CSV. Verifica que el enlace sea público y termine en output=csv.";
+        error: function(err) {
+          console.error(err);
+          document.getElementById("estado-carga").textContent = "Error al leer el CSV. Si lo estás abriendo directo desde tu PC, súbelo a GitHub Pages para que el navegador permita la conexión.";
         }
       });
     }
