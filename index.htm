@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visualizador de Fichas</title>
+  <!-- Librería de diseño (Tailwind CSS) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Librería para leer archivos CSV de Google Sheets sin errores de comas -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <style>
+    /* Reglas exclusivas para cuando se imprime o guarda como PDF */
+    @media print {
+      body { background: white !important; }
+      .no-print { display: none !important; }
+      #ficha-contenedor {
+        box-shadow: none !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        max-width: 100% !important;
+      }
+      .campo-ficha { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen font-sans">
+
+  <!-- Barra superior de búsqueda (se oculta al imprimir) -->
+  <header class="no-print bg-blue-950 text-white shadow-md sticky top-0 z-10">
+    <div class="max-w-5xl mx-auto px-4 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <p class="text-xs uppercase tracking-wider text-blue-200">Sistema de Consulta</p>
+        <h1 class="text-lg font-bold">Visualizador de Fichas de Registro</h1>
+      </div>
+      <div class="flex flex-wrap gap-2 items-center">
+        <button onclick="window.print()" id="btn-imprimir" disabled
+          class="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition cursor-pointer">
+          Imprimir / Guardar PDF
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <!-- Panel de búsqueda (se oculta al imprimir) -->
+    <section class="no-print bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
+      <label for="buscador" class="block text-sm font-semibold text-slate-700 mb-2">
+        Buscar registro (escribe código, nombre, institución o cualquier dato):
+      </label>
+      <div class="flex gap-2">
+        <input type="text" id="buscador" placeholder="Ej. 001, UGEL 03, Juan Pérez..."
+          class="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600">
+        <button onclick="limpiarBusqueda()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm px-4 py-2 rounded-lg">
+          Limpiar
+        </button>
+      </div>
+      <p id="estado-carga" class="text-xs text-slate-500 mt-2">Cargando base de datos...</p>
+
+      <!-- Lista de resultados encontrados -->
+      <div id="lista-resultados" class="mt-3 max-h-56 overflow-y-auto divide-y divide-slate-100 border-t border-slate-100"></div>
+    </section>
+
+    <!-- Contenedor de la Ficha (esto es lo único que sale en el PDF) -->
+    <article id="ficha-contenedor" class="hidden bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
+      <!-- Encabezado de la ficha -->
+      <div class="bg-blue-900 text-white px-6 py-5 flex justify-between items-start">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-blue-200">Ficha Individual de Registro</p>
+          <h2 id="ficha-titulo" class="text-xl font-bold mt-1">Título del Registro</h2>
+          <p id="ficha-subtitulo" class="text-sm text-blue-100 mt-0.5"></p>
+        </div>
+        <span id="ficha-fecha" class="text-xs bg-blue-800 px-3 py-1 rounded-full"></span>
+      </div>
+
+      <!-- Cuerpo de campos dinámicos -->
+      <div id="ficha-campos" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+
+      <!-- Pie de ficha -->
+      <div class="bg-slate-50 border-t border-slate-200 px-6 py-3 text-xs text-slate-500 flex justify-between">
+        <span>Documento generado automáticamente desde la base de datos.</span>
+        <span id="fecha-impresion"></span>
+      </div>
+    </article>
+  </main>
+
+  <script>
+    // =========================================================================
+    // 1. CONFIGURACIÓN: Pega aquí el enlace CSV publicado desde Google Sheets
+    // =========================================================================
+    const CSV_URL = https://docs.google.com/spreadsheets/d/e/2PACX-1vSxCtFuaJAvJVU0jEKrtjkNSXNGLTbbF1KE8DW_1gU99CeOQ1tiM0D6CHojkKQoIETNpwJQ9tl1K7By/pub?gid=0&single=true&output=csv;
+
+    // (Opcional) Escribe el nombre EXACTO de la columna que quieres como título
+    // principal de la ficha. Si lo dejas vacío "", usará la segunda columna.
+    const COLUMNA_TITULO = "IIEE";
+    const COLUMNA_SUBTITULO = "CODIGO LOCAL";
+
+    // =========================================================================
+    // 2. LÓGICA DEL VISUALIZADOR (No necesitas modificar nada debajo)
+    // =========================================================================
+    let registros = [];
+    let columnas = [];
+
+    // Datos de ejemplo para que veas cómo funciona antes de poner tu enlace
+    const datosDemo = [
+      { "Marca temporal": "25/11/2026 08:30", "Código": "IE-001", "Institución": "I.E. Ejemplo Central", "UGEL": "UGEL 03", "Estado": "Completado", "Observaciones": "Sin novedades en la infraestructura." },
+      { "Marca temporal": "25/11/2026 09:15", "Código": "IE-002", "Institución": "I.E. Santa Rosa", "UGEL": "UGEL 07", "Estado": "En proceso", "Observaciones": "Pendiente validar lista de docentes." }
+    ];
+
+    function iniciar() {
+      if (CSV_URL === "PEGA_AQUI_TU_ENLACE_CSV_DE_GOOGLE_SHEETS" || !CSV_URL.trim()) {
+        registros = datosDemo;
+        columnas = Object.keys(datosDemo[0]);
+        document.getElementById("estado-carga").textContent = "Modo demostración (2 registros). Reemplaza CSV_URL en el código con tu enlace de Google Sheets.";
+        renderizarResultados(registros);
+        return;
+      }
+
+      Papa.parse(CSV_URL, {
+        download: true,
+        header: true,
+        skipEmptyLines: true,
+        complete: function(res) {
+          registros = res.data;
+          columnas = res.meta.fields || [];
+          document.getElementById("estado-carga").textContent = `Base conectada: ${registros.length} registros disponibles.`;
+          renderizarResultados(registros.slice(0, 20)); // Muestra los primeros 20 por defecto
+        },
+        error: function() {
+          document.getElementById("estado-carga").textContent = "Error al leer el CSV. Verifica que el enlace sea público y termine en output=csv.";
+        }
+      });
+    }
+
+    function obtenerTextoResumen(fila) {
+      const colTitulo = COLUMNA_TITULO && fila[COLUMNA_TITULO] ? fila[COLUMNA_TITULO] : (fila[columnas[1]] || fila[columnas[0]] || "Sin título");
+      const colSub = COLUMNA_SUBTITULO && fila[COLUMNA_SUBTITULO] ? fila[COLUMNA_SUBTITULO] : (fila[columnas[2]] || "");
+      return { titulo: colTitulo, subtitulo: colSub };
+    }
+
+    function renderizarResultados(lista) {
+      const contenedor = document.getElementById("lista-resultados");
+      contenedor.innerHTML = "";
+
+      if (lista.length === 0) {
+        contenedor.innerHTML = `<p class="text-sm text-slate-500 py-3">No se encontraron coincidencias.</p>`;
+        return;
+      }
+
+      lista.forEach((fila) => {
+        const { titulo, subtitulo } = obtenerTextoResumen(fila);
+        const boton = document.createElement("button");
+        boton.className = "w-full text-left px-3 py-2.5 hover:bg-blue-50 transition flex justify-between items-center cursor-pointer";
+        boton.innerHTML = `
+          <div>
+            <p class="text-sm font-semibold text-slate-800">${titulo}</p>
+            <p class="text-xs text-slate-500">${subtitulo}</p>
+          </div>
+          <span class="text-xs font-medium text-blue-700">Ver ficha →</span>
+        `;
+        boton.onclick = () => mostrarFicha(fila);
+        contenedor.appendChild(boton);
+      });
+    }
+
+    function mostrarFicha(fila) {
+      const { titulo, subtitulo } = obtenerTextoResumen(fila);
+      document.getElementById("ficha-titulo").textContent = titulo;
+      document.getElementById("ficha-subtitulo").textContent = subtitulo;
+      document.getElementById("ficha-fecha").textContent = fila[columnas[0]] || "";
+      document.getElementById("fecha-impresion").textContent = "Consulta: " + new Date().toLocaleString("es-PE");
+
+      const contenedorCampos = document.getElementById("ficha-campos");
+      contenedorCampos.innerHTML = "";
+
+      columnas.forEach((col) => {
+        const valor = fila[col] && fila[col].trim() !== "" ? fila[col] : "—";
+        const tarjeta = document.createElement("div");
+        tarjeta.className = "campo-ficha bg-slate-50 border border-slate-200 rounded-lg p-3";
+        tarjeta.innerHTML = `
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">${col}</p>
+          <p class="text-sm text-slate-900 mt-1 whitespace-pre-line">${valor}</p>
+        `;
+        contenedorCampos.appendChild(tarjeta);
+      });
+
+      document.getElementById("ficha-contenedor").classList.remove("hidden");
+      document.getElementById("btn-imprimir").disabled = false;
+    }
+
+    document.getElementById("buscador").addEventListener("input", function(e) {
+      const texto = e.target.value.toLowerCase().trim();
+      if (!texto) {
+        renderizarResultados(registros.slice(0, 20));
+        return;
+      }
+      const filtrados = registros.filter(fila =>
+        Object.values(fila).some(val => String(val).toLowerCase().includes(texto))
+      );
+      renderizarResultados(filtrados.slice(0, 50));
+    });
+
+    function limpiarBusqueda() {
+      document.getElementById("buscador").value = "";
+      renderizarResultados(registros.slice(0, 20));
+    }
+
+    iniciar();
+  </script>
+</body>
+</html>
